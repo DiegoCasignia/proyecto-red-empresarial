@@ -1,0 +1,1609 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!                                                                              !
+!   PROYECTO REDES DE COMUNICACIONES                                           !
+!   CONFIGURACION COMPLETA - IOS CISCO                                         !
+!   Topologia: Matriz (UIO) + Sucursales (GYE, CUE) + ISP Cloud               !
+!                                                                              !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! 1. MATRIZ - QUITO (UIO)                                                     !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+!===============================================================================
+! R1-UIO (Router de Borde - Quito)
+!===============================================================================
+enable
+config terminal
+hostname R1-UIO
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+
+service password-encryption
+ip domain-name rugied.local
+enable secret RUGIEDadmin2024
+username admin secret RUGIEDadmin2024
+
+crypto key generate rsa modulus 2048
+ip ssh version 2
+
+! Interfaz hacia MLS-UIO
+interface GigabitEthernet0/0/1
+ description Enlace a MLS-UIO
+ ip address 192.168.0.1 255.255.255.252
+ no shutdown
+
+! Interfaz WAN hacia ISP (R3-ISP)
+interface Serial0/1/0
+ description WAN a R3-ISP (200.0.1.2)
+ ip address 200.0.1.1 255.255.255.252
+ ip nat outside
+ no shutdown
+
+! Loopback para identificacion OSPF/EIGRP
+interface Loopback0
+ ip address 10.255.255.1 255.255.255.255
+ no shutdown
+
+! TUNEL GRE hacia R1-GYE (192.168.200.0/30)
+interface Tunnel0
+ description VPN GRE hacia R1-GYE
+ ip address 192.168.200.1 255.255.255.252
+ tunnel source Serial0/1/0
+ tunnel destination 200.0.2.1
+
+! TUNEL GRE hacia R1-CUE (192.168.200.4/30)
+interface Tunnel1
+ description VPN GRE hacia R1-CUE
+ ip address 192.168.200.5 255.255.255.252
+ tunnel source Serial0/1/0
+ tunnel destination 200.0.3.1
+
+! IPsec: ISAKMP (IKE) Policy
+crypto isakmp policy 10
+ encryption aes 256
+ hash sha
+ authentication pre-share
+ group 5
+ lifetime 86400
+
+! Pre-shared keys para cada peer
+crypto isakmp key RUGIED-VPN address 200.0.2.1
+crypto isakmp key RUGIED-VPN address 200.0.3.1
+
+! IPsec: Transform-set
+crypto ipsec transform-set RUGIED-TS esp-aes 256 esp-sha-hmac
+ mode tunnel
+
+! ACLs para trafico GRE a proteger
+ip access-list extended ACL-GRE-GYE
+ permit gre host 200.0.1.1 host 200.0.2.1
+
+ip access-list extended ACL-GRE-CUE
+ permit gre host 200.0.1.1 host 200.0.3.1
+
+! Crypto Map (multi-entry: una por peer)
+crypto map CM-VPN 10 ipsec-isakmp
+ set peer 200.0.2.1
+ set transform-set RUGIED-TS
+ match address ACL-GRE-GYE
+
+crypto map CM-VPN 20 ipsec-isakmp
+ set peer 200.0.3.1
+ set transform-set RUGIED-TS
+ match address ACL-GRE-CUE
+
+! Aplicar crypto map a la interfaz WAN
+interface Serial0/1/0
+ crypto map CM-VPN
+
+! NAT Overload
+ip access-list standard ACL-NAT
+ permit 192.168.0.0 0.0.255.255
+
+interface GigabitEthernet0/0/1
+ ip nat inside
+
+ip nat inside source list ACL-NAT interface Serial0/1/0 overload
+
+! OSPF (Underlay - Red Publica ISP)
+router ospf 1
+ router-id 10.255.255.1
+ network 200.0.1.0 0.0.0.3 area 0
+ passive-interface default
+ no passive-interface Serial0/1/0
+
+! EIGRP (Overlay - Red Privada sobre Tuneles)
+router eigrp 100
+ network 192.168.0.0 0.0.0.3
+ network 192.168.200.0 0.0.0.3
+ network 192.168.200.4 0.0.0.3
+ network 10.255.255.1 0.0.0.0
+ passive-interface default
+ no passive-interface GigabitEthernet0/0/1
+ no passive-interface Tunnel0
+ no passive-interface Tunnel1
+
+! Ruta por defecto (opcional, hacia ISP)
+ip route 0.0.0.0 0.0.0.0 200.0.1.2
+
+! Seguridad: SSH en lineas VTY
+line vty 0 15
+ transport input ssh
+ login local
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! MLS-UIO (Multilayer Switch - Nucleo Colapsado - Quito)
+!===============================================================================
+enable
+config terminal
+hostname MLS-UIO
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+ip domain-name rugied.local
+enable secret RUGIEDadmin2024
+username admin secret RUGIEDadmin2024
+
+crypto key generate rsa modulus 2048
+ip ssh version 2
+
+! VLANs
+vlan 20
+ name RH
+vlan 30
+ name Operaciones
+vlan 40
+ name Gerencia
+vlan 60
+ name Capacitaciones
+vlan 70
+ name Finanzas
+vlan 80
+ name Marketing
+vlan 90
+ name DataCenter-TI
+
+! Puerto enrutado hacia R1-UIO
+interface GigabitEthernet1/0/1
+ description Enlace a R1-UIO
+ no switchport
+ ip address 192.168.0.2 255.255.255.252
+
+! Puertos troncales hacia los switches de acceso
+interface GigabitEthernet1/0/2
+ description Trunk a SW1-UIO
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface GigabitEthernet1/0/3
+ description Trunk a SW2-UIO
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface GigabitEthernet1/0/4
+ description Trunk a SW3-UIO
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface GigabitEthernet1/0/5
+ description Trunk a SW4-UIO
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+! Inter-VLAN Routing
+interface Vlan20
+ description RH
+ ip address 192.168.20.1 255.255.255.192
+ no shutdown
+
+interface Vlan30
+ description Operaciones
+ ip address 192.168.30.1 255.255.255.224
+ no shutdown
+
+interface Vlan40
+ description Gerencia
+ ip address 192.168.40.1 255.255.255.224
+ no shutdown
+
+interface Vlan60
+ description Capacitaciones
+ ip address 192.168.60.1 255.255.255.240
+ no shutdown
+
+interface Vlan70
+ description Finanzas
+ ip address 192.168.70.1 255.255.255.224
+ no shutdown
+
+interface Vlan80
+ description Marketing
+ ip address 192.168.80.1 255.255.255.224
+ no shutdown
+
+interface Vlan90
+ description DataCenter-TI
+ ip address 192.168.90.1 255.255.255.240
+ no shutdown
+
+! STP: MLS como Root Bridge primario
+spanning-tree vlan 1-4096 priority 4096
+
+! DHCP
+ip dhcp excluded-address 192.168.20.1
+ip dhcp excluded-address 192.168.30.1
+ip dhcp excluded-address 192.168.40.1
+ip dhcp excluded-address 192.168.60.1
+ip dhcp excluded-address 192.168.70.1
+ip dhcp excluded-address 192.168.80.1
+ip dhcp excluded-address 192.168.90.1 192.168.90.13
+
+! DHCP Pools
+ip dhcp pool VLAN20-RH
+ network 192.168.20.0 255.255.255.192
+ default-router 192.168.20.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN30-OPERACIONES
+ network 192.168.30.0 255.255.255.224
+ default-router 192.168.30.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN40-GERENCIA
+ network 192.168.40.0 255.255.255.224
+ default-router 192.168.40.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN60-CAPACITACIONES
+ network 192.168.60.0 255.255.255.240
+ default-router 192.168.60.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN70-FINANZAS
+ network 192.168.70.0 255.255.255.224
+ default-router 192.168.70.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN80-MARKETING
+ network 192.168.80.0 255.255.255.224
+ default-router 192.168.80.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+! EIGRP (Overlay)
+router eigrp 100
+ network 192.168.0.0 0.0.0.3
+ network 192.168.20.0 0.0.0.63
+ network 192.168.30.0 0.0.0.31
+ network 192.168.40.0 0.0.0.31
+ network 192.168.60.0 0.0.0.15
+ network 192.168.70.0 0.0.0.31
+ network 192.168.80.0 0.0.0.31
+ network 192.168.90.0 0.0.0.15
+ passive-interface default
+ no passive-interface GigabitEthernet1/0/1
+
+! Seguridad
+line vty 0 15
+ transport input ssh
+ login local
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW1-UIO (Switch Acceso L2 - Quito - RH, Operaciones)
+!===============================================================================
+enable
+config terminal
+hostname SW1-UIO
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+! VLANs
+vlan 20
+ name RH
+vlan 30
+ name Operaciones
+
+! Trunk hacia MLS-UIO
+interface GigabitEthernet0/1
+ description Trunk a MLS-UIO
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+! Puertos de acceso: RH (VLAN 20)
+interface range FastEthernet0/1-12
+ description RH
+ switchport mode access
+ switchport access vlan 20
+ spanning-tree portfast
+
+! Puertos de acceso: Operaciones (VLAN 30)
+interface range FastEthernet0/13-24
+ description Operaciones
+ switchport mode access
+ switchport access vlan 30
+ spanning-tree portfast
+
+! STP
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW2-UIO (Switch Acceso L2 - Quito - Gerencia, Capacitaciones)
+!===============================================================================
+enable
+config terminal
+hostname SW2-UIO
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+vlan 40
+ name Gerencia
+vlan 60
+ name Capacitaciones
+
+interface GigabitEthernet0/1
+ description Trunk a MLS-UIO
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface range FastEthernet0/1-12
+ description Gerencia
+ switchport mode access
+ switchport access vlan 40
+ spanning-tree portfast
+
+interface range FastEthernet0/13-24
+ description Capacitaciones
+ switchport mode access
+ switchport access vlan 60
+ spanning-tree portfast
+
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW3-UIO (Switch Acceso L2 - Quito - Finanzas, Marketing)
+!===============================================================================
+enable
+config terminal
+hostname SW3-UIO
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+vlan 70
+ name Finanzas
+vlan 80
+ name Marketing
+
+interface GigabitEthernet0/1
+ description Trunk a MLS-UIO
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface range FastEthernet0/1-12
+ description Finanzas
+ switchport mode access
+ switchport access vlan 70
+ spanning-tree portfast
+
+interface range FastEthernet0/13-24
+ description Marketing
+ switchport mode access
+ switchport access vlan 80
+ spanning-tree portfast
+
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW4-UIO (Switch Acceso L2 - Quito - Data Center)
+!===============================================================================
+enable
+config terminal
+hostname SW4-UIO
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+vlan 90
+ name DataCenter-TI
+
+interface GigabitEthernet0/1
+ description Trunk a MLS-UIO
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+! Puertos de acceso para servidores (VLAN 90) - IPs estaticas
+interface FastEthernet0/1
+ description Servidor DNS (192.168.90.10)
+ switchport mode access
+ switchport access vlan 90
+ spanning-tree portfast
+
+interface FastEthernet0/2
+ description Servidor WEB (192.168.90.11)
+ switchport mode access
+ switchport access vlan 90
+ spanning-tree portfast
+
+interface FastEthernet0/3
+ description Servidor FTP (192.168.90.12)
+ switchport mode access
+ switchport access vlan 90
+ spanning-tree portfast
+
+interface FastEthernet0/4
+ description Servidor CORREO (192.168.90.13)
+ switchport mode access
+ switchport access vlan 90
+ spanning-tree portfast
+
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! 2. SUCURSAL GUAYAQUIL (GYE)                                                 !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
+!===============================================================================
+! R1-GYE (Router de Borde - Guayaquil)
+!===============================================================================
+enable
+config terminal
+hostname R1-GYE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+ip domain-name rugied.local
+enable secret RUGIEDadmin2024
+username admin secret RUGIEDadmin2024
+
+crypto key generate rsa modulus 2048
+ip ssh version 2
+
+! Interfaz hacia MLS-GYE
+interface GigabitEthernet0/0/1
+ description Enlace a MLS-GYE
+ ip address 172.168.0.1 255.255.255.252
+ no shutdown
+
+! Interfaz WAN hacia ISP (R1-ISP)
+interface Serial0/1/0
+ description WAN a R1-ISP (200.0.2.2)
+ ip address 200.0.2.1 255.255.255.252
+ ip nat outside
+ no shutdown
+
+! Loopback
+interface Loopback0
+ ip address 10.255.255.2 255.255.255.255
+ no shutdown
+
+! Tunel GRE hacia R1-UIO (192.168.200.0/30)
+interface Tunnel0
+ description VPN GRE hacia R1-UIO
+ ip address 192.168.200.2 255.255.255.252
+ tunnel source Serial0/1/0
+ tunnel destination 200.0.1.1
+
+! Tunel GRE hacia R1-CUE (192.168.200.8/30)
+interface Tunnel1
+ description VPN GRE hacia R1-CUE
+ ip address 192.168.200.9 255.255.255.252
+ tunnel source Serial0/1/0
+ tunnel destination 200.0.3.1
+
+! IPsec
+crypto isakmp policy 10
+ encryption aes 256
+ hash sha
+ authentication pre-share
+ group 5
+ lifetime 86400
+
+crypto isakmp key RUGIED-VPN address 200.0.1.1
+crypto isakmp key RUGIED-VPN address 200.0.3.1
+
+crypto ipsec transform-set RUGIED-TS esp-aes 256 esp-sha-hmac
+ mode tunnel
+
+ip access-list extended ACL-GRE-UIO
+ permit gre host 200.0.2.1 host 200.0.1.1
+
+ip access-list extended ACL-GRE-CUE
+ permit gre host 200.0.2.1 host 200.0.3.1
+
+crypto map CM-VPN 10 ipsec-isakmp
+ set peer 200.0.1.1
+ set transform-set RUGIED-TS
+ match address ACL-GRE-UIO
+
+crypto map CM-VPN 20 ipsec-isakmp
+ set peer 200.0.3.1
+ set transform-set RUGIED-TS
+ match address ACL-GRE-CUE
+
+interface Serial0/1/0
+ crypto map CM-VPN
+
+! NAT Overload
+ip access-list standard ACL-NAT
+ permit 172.168.0.0 0.0.255.255
+
+interface GigabitEthernet0/0/1
+ ip nat inside
+
+ip nat inside source list ACL-NAT interface Serial0/1/0 overload
+
+! OSPF (Underlay)
+router ospf 1
+ router-id 10.255.255.2
+ network 200.0.2.0 0.0.0.3 area 0
+ passive-interface default
+ no passive-interface Serial0/1/0
+
+! EIGRP (Overlay)
+router eigrp 100
+ network 172.168.0.0 0.0.0.3
+ network 192.168.200.0 0.0.0.3
+ network 192.168.200.8 0.0.0.3
+ network 10.255.255.2 0.0.0.0
+ passive-interface default
+ no passive-interface GigabitEthernet0/0/1
+ no passive-interface Tunnel0
+ no passive-interface Tunnel1
+
+ip route 0.0.0.0 0.0.0.0 200.0.2.2
+
+line vty 0 15
+ transport input ssh
+ login local
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! MLS-GYE (Multilayer Switch - Nucleo Colapsado - Guayaquil)
+!===============================================================================
+enable
+config terminal
+hostname MLS-GYE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+ip domain-name rugied.local
+enable secret RUGIEDadmin2024
+username admin secret RUGIEDadmin2024
+
+crypto key generate rsa modulus 2048
+ip ssh version 2
+
+! VLANs
+vlan 110
+ name Atencion-Cliente
+vlan 120
+ name Administrativo
+vlan 130
+ name Logistica
+vlan 140
+ name Seguridad-Fisica
+
+! Puerto enrutado hacia R1-GYE
+interface GigabitEthernet1/0/1
+ description Enlace a R1-GYE
+ no switchport
+ ip address 172.168.0.2 255.255.255.252
+
+! Puertos trunk hacia switches de acceso
+interface GigabitEthernet1/0/2
+ description Trunk a SW1-GYE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface GigabitEthernet1/0/3
+ description Trunk a SW2-GYE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+! SVIs
+interface Vlan110
+ description Atencion-Cliente
+ ip address 172.168.110.1 255.255.255.192
+ no shutdown
+
+interface Vlan120
+ description Administrativo
+ ip address 172.168.120.1 255.255.255.192
+ no shutdown
+
+interface Vlan130
+ description Logistica
+ ip address 172.168.130.1 255.255.255.0
+ no shutdown
+
+interface Vlan140
+ description Seguridad-Fisica
+ ip address 172.168.140.1 255.255.255.224
+ no shutdown
+
+! STP
+spanning-tree vlan 1-4096 priority 4096
+
+! DHCP Exclusiones
+ip dhcp excluded-address 172.168.110.1
+ip dhcp excluded-address 172.168.120.1
+ip dhcp excluded-address 172.168.130.1
+ip dhcp excluded-address 172.168.140.1
+
+! DHCP Pools
+ip dhcp pool VLAN110-ATENCION
+ network 172.168.110.0 255.255.255.192
+ default-router 172.168.110.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN120-ADMIN
+ network 172.168.120.0 255.255.255.192
+ default-router 172.168.120.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN130-LOGISTICA
+ network 172.168.130.0 255.255.255.0
+ default-router 172.168.130.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN140-SEGURIDAD
+ network 172.168.140.0 255.255.255.224
+ default-router 172.168.140.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+! EIGRP
+router eigrp 100
+ network 172.168.0.0 0.0.0.3
+ network 172.168.110.0 0.0.0.63
+ network 172.168.120.0 0.0.0.63
+ network 172.168.130.0 0.0.0.255
+ network 172.168.140.0 0.0.0.31
+ passive-interface default
+ no passive-interface GigabitEthernet1/0/1
+
+line vty 0 15
+ transport input ssh
+ login local
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW1-GYE (Switch Acceso L2 - Guayaquil - Atencion Cliente, Administrativo)
+!===============================================================================
+enable
+config terminal
+hostname SW1-GYE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+vlan 110
+ name Atencion-Cliente
+vlan 120
+ name Administrativo
+
+interface GigabitEthernet0/1
+ description Trunk a MLS-GYE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface range FastEthernet0/1-12
+ description Atencion-Cliente
+ switchport mode access
+ switchport access vlan 110
+ spanning-tree portfast
+
+interface range FastEthernet0/13-24
+ description Administrativo
+ switchport mode access
+ switchport access vlan 120
+ spanning-tree portfast
+
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW2-GYE (Switch Acceso L2 - Guayaquil - Logistica, Seguridad Fisica)
+!===============================================================================
+enable
+config terminal
+hostname SW2-GYE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+vlan 130
+ name Logistica
+vlan 140
+ name Seguridad-Fisica
+
+interface GigabitEthernet0/1
+ description Trunk a MLS-GYE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface range FastEthernet0/1-20
+ description Logistica
+ switchport mode access
+ switchport access vlan 130
+ spanning-tree portfast
+
+interface range FastEthernet0/21-24
+ description Seguridad-Fisica
+ switchport mode access
+ switchport access vlan 140
+ spanning-tree portfast
+
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! 3. SUCURSAL CUENCA (CUE)                                                    !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
+!===============================================================================
+! R1-CUE (Router de Borde - Cuenca)
+!===============================================================================
+enable
+config terminal
+hostname R1-CUE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+ip domain-name rugied.local
+enable secret RUGIEDadmin2024
+username admin secret RUGIEDadmin2024
+
+crypto key generate rsa modulus 2048
+ip ssh version 2
+
+! Interfaz hacia MLS-CUE
+interface GigabitEthernet0/0/1
+ description Enlace a MLS-CUE
+ ip address 10.0.0.1 255.255.255.252
+ no shutdown
+
+! Interfaz WAN hacia ISP (R5-ISP)
+interface Serial0/1/0
+ description WAN a R5-ISP (200.0.3.2)
+ ip address 200.0.3.1 255.255.255.252
+ ip nat outside
+ no shutdown
+
+! Loopback
+interface Loopback0
+ ip address 10.255.255.3 255.255.255.255
+ no shutdown
+
+! Tunel GRE hacia R1-UIO (192.168.200.4/30)
+interface Tunnel0
+ description VPN GRE hacia R1-UIO
+ ip address 192.168.200.6 255.255.255.252
+ tunnel source Serial0/1/0
+ tunnel destination 200.0.1.1
+
+! Tunel GRE hacia R1-GYE (192.168.200.8/30)
+interface Tunnel1
+ description VPN GRE hacia R1-GYE
+ ip address 192.168.200.10 255.255.255.252
+ tunnel source Serial0/1/0
+ tunnel destination 200.0.2.1
+
+! IPsec
+crypto isakmp policy 10
+ encryption aes 256
+ hash sha
+ authentication pre-share
+ group 5
+ lifetime 86400
+
+crypto isakmp key RUGIED-VPN address 200.0.1.1
+crypto isakmp key RUGIED-VPN address 200.0.2.1
+
+crypto ipsec transform-set RUGIED-TS esp-aes 256 esp-sha-hmac
+ mode tunnel
+
+ip access-list extended ACL-GRE-UIO
+ permit gre host 200.0.3.1 host 200.0.1.1
+
+ip access-list extended ACL-GRE-GYE
+ permit gre host 200.0.3.1 host 200.0.2.1
+
+crypto map CM-VPN 10 ipsec-isakmp
+ set peer 200.0.1.1
+ set transform-set RUGIED-TS
+ match address ACL-GRE-UIO
+
+crypto map CM-VPN 20 ipsec-isakmp
+ set peer 200.0.2.1
+ set transform-set RUGIED-TS
+ match address ACL-GRE-GYE
+
+interface Serial0/1/0
+ crypto map CM-VPN
+
+! NAT Overload
+ip access-list standard ACL-NAT
+ permit 10.0.0.0 0.0.255.255
+
+interface GigabitEthernet0/0/1
+ ip nat inside
+
+ip nat inside source list ACL-NAT interface Serial0/1/0 overload
+
+! OSPF
+router ospf 1
+ router-id 10.255.255.3
+ network 200.0.3.0 0.0.0.3 area 0
+ passive-interface default
+ no passive-interface Serial0/1/0
+
+! EIGRP
+router eigrp 100
+ network 10.0.0.0 0.0.0.3
+ network 192.168.200.4 0.0.0.3
+ network 192.168.200.8 0.0.0.3
+ network 10.255.255.3 0.0.0.0
+ passive-interface default
+ no passive-interface GigabitEthernet0/0/1
+ no passive-interface Tunnel0
+ no passive-interface Tunnel1
+
+ip route 0.0.0.0 0.0.0.0 200.0.3.2
+
+line vty 0 15
+ transport input ssh
+ login local
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! MLS-CUE (Multilayer Switch - Nucleo Colapsado - Cuenca)
+!===============================================================================
+enable
+config terminal
+hostname MLS-CUE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+ip domain-name rugied.local
+enable secret RUGIEDadmin2024
+username admin secret RUGIEDadmin2024
+
+crypto key generate rsa modulus 2048
+ip ssh version 2
+
+! VLANs
+vlan 150
+ name Atencion-Cliente
+vlan 160
+ name Soporte-Tecnico
+vlan 170
+ name Administrador
+vlan 180
+ name Invitados
+
+! Puerto enrutado hacia R1-CUE
+interface GigabitEthernet1/0/1
+ description Enlace a R1-CUE
+ no switchport
+ ip address 10.0.0.2 255.255.255.252
+
+! Puertos trunk hacia switches de acceso
+interface GigabitEthernet1/0/2
+ description Trunk a SW1-CUE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface GigabitEthernet1/0/3
+ description Trunk a SW2-CUE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface GigabitEthernet1/0/4
+ description Trunk a SW3-CUE (STP)
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+! SVIs
+interface Vlan150
+ description Atencion-Cliente
+ ip address 10.0.150.1 255.255.255.192
+ no shutdown
+
+interface Vlan160
+ description Soporte-Tecnico
+ ip address 10.0.160.1 255.255.255.192
+ no shutdown
+
+interface Vlan170
+ description Administrador
+ ip address 10.0.170.1 255.255.255.224
+ no shutdown
+
+interface Vlan180
+ description Invitados
+ ip address 10.0.180.1 255.255.255.224
+ no shutdown
+
+! STP: MLS como Root Bridge primario
+spanning-tree vlan 1-4096 priority 4096
+
+! DHCP Exclusiones
+ip dhcp excluded-address 10.0.150.1
+ip dhcp excluded-address 10.0.160.1
+ip dhcp excluded-address 10.0.170.1
+ip dhcp excluded-address 10.0.180.1
+
+! DHCP Pools
+ip dhcp pool VLAN150-ATENCION
+ network 10.0.150.0 255.255.255.192
+ default-router 10.0.150.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN160-SOPORTE
+ network 10.0.160.0 255.255.255.192
+ default-router 10.0.160.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN170-ADMIN
+ network 10.0.170.0 255.255.255.224
+ default-router 10.0.170.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+ip dhcp pool VLAN180-INVITADOS
+ network 10.0.180.0 255.255.255.224
+ default-router 10.0.180.1
+ dns-server 192.168.90.10
+ domain-name rugied.local
+
+! EIGRP
+router eigrp 100
+ network 10.0.0.0 0.0.0.3
+ network 10.0.150.0 0.0.0.63
+ network 10.0.160.0 0.0.0.63
+ network 10.0.170.0 0.0.0.31
+ network 10.0.180.0 0.0.0.31
+ passive-interface default
+ no passive-interface GigabitEthernet1/0/1
+
+line vty 0 15
+ transport input ssh
+ login local
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW1-CUE (Switch Acceso L2 - Cuenca - Atencion Cliente, Soporte Tecnico)
+!===============================================================================
+enable
+config terminal
+hostname SW1-CUE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+vlan 150
+ name Atencion-Cliente
+vlan 160
+ name Soporte-Tecnico
+
+interface GigabitEthernet0/1
+ description Trunk a MLS-CUE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface range FastEthernet0/1-12
+ description Atencion-Cliente
+ switchport mode access
+ switchport access vlan 150
+ spanning-tree portfast
+
+interface range FastEthernet0/13-24
+ description Soporte-Tecnico
+ switchport mode access
+ switchport access vlan 160
+ spanning-tree portfast
+
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW2-CUE (Switch Acceso L2 - Cuenca - Administrador, Invitados + STP Loop)
+!===============================================================================
+enable
+config terminal
+hostname SW2-CUE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+vlan 170
+ name Administrador
+vlan 180
+ name Invitados
+
+interface GigabitEthernet0/1
+ description Trunk a MLS-CUE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+! Enlace directo a SW3-CUE para crear bucle STP
+interface GigabitEthernet0/2
+ description Enlace directo a SW3-CUE (Loop STP)
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+interface range FastEthernet0/1-12
+ description Administrador
+ switchport mode access
+ switchport access vlan 170
+ spanning-tree portfast
+
+interface range FastEthernet0/13-24
+ description Invitados
+ switchport mode access
+ switchport access vlan 180
+ spanning-tree portfast
+
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! SW3-CUE (Switch STP - Solo para redundancia/bucles L2 - Sin usuarios)
+!===============================================================================
+enable
+config terminal
+hostname SW3-CUE
+banner motd # ACCESO RESTRINGIDO. NO INGRESE SIN AUTORIZACION. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+! Enlace trunk a MLS-CUE
+interface GigabitEthernet0/2
+ description Trunk a MLS-CUE
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+! Enlace directo a SW2-CUE (crea bucle L2)
+interface GigabitEthernet0/1
+ description Enlace directo a SW2-CUE (Loop STP)
+ switchport mode trunk
+ switchport trunk allowed vlan all
+
+! Prioridad STP alta para que nunca sea root bridge
+spanning-tree vlan 1-4096 priority 61440
+
+spanning-tree mode rapid-pvst
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! 4. PROVEEDOR DE SERVICIOS (ISP CLOUD)                                       !
+!    Topologia: Malla parcial - 7 routers - OSPF Area 0                       !
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
+!===============================================================================
+! R1-ISP
+! Conexiones: Se0/1/0 -> R1-GYE, Se0/2/0 -> R2-ISP, Se0/1/1 -> R6-ISP
+!===============================================================================
+enable
+config terminal
+hostname R1-ISP
+banner motd # ACCESO RESTRINGIDO. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+interface Serial0/1/0
+ description WAN a R1-GYE (200.0.2.1)
+ ip address 200.0.2.2 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/2/0
+ description Enlace a R2-ISP (Se0/1/0)
+ ip address 200.0.4.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/1/1
+ description Enlace a R6-ISP (Se0/1/0)
+ ip address 200.0.9.2 255.255.255.252
+ no shutdown
+
+router ospf 1
+ router-id 1.1.1.1
+ network 200.0.2.0 0.0.0.3 area 0
+ network 200.0.4.0 0.0.0.3 area 0
+ network 200.0.9.0 0.0.0.3 area 0
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! R2-ISP
+! Conexiones: Se0/1/0 -> R1-ISP, Se0/1/1 -> R3-ISP, Se0/2/0 -> R7-ISP
+!===============================================================================
+enable
+config terminal
+hostname R2-ISP
+banner motd # ACCESO RESTRINGIDO. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+interface Serial0/1/0
+ description Enlace a R1-ISP (Se0/2/0)
+ ip address 200.0.4.2 255.255.255.252
+ no shutdown
+
+interface Serial0/1/1
+ description Enlace a R3-ISP (Se0/1/1)
+ ip address 200.0.5.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/2/0
+ description Enlace a R7-ISP (Se0/1/0)
+ ip address 200.0.10.2 255.255.255.252
+ no shutdown
+
+router ospf 1
+ router-id 2.2.2.2
+ network 200.0.4.0 0.0.0.3 area 0
+ network 200.0.5.0 0.0.0.3 area 0
+ network 200.0.10.0 0.0.0.3 area 0
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! R3-ISP
+! Conexiones: Se0/1/0 -> R1-UIO, Se0/1/1 -> R2-ISP, Se0/2/0 -> R4-ISP
+!===============================================================================
+enable
+config terminal
+hostname R3-ISP
+banner motd # ACCESO RESTRINGIDO. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+interface Serial0/1/0
+ description WAN a R1-UIO (200.0.1.1)
+ ip address 200.0.1.2 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/1/1
+ description Enlace a R2-ISP (Se0/1/1)
+ ip address 200.0.5.2 255.255.255.252
+ no shutdown
+
+interface Serial0/2/0
+ description Enlace a R4-ISP (Se0/1/0)
+ ip address 200.0.6.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+router ospf 1
+ router-id 3.3.3.3
+ network 200.0.1.0 0.0.0.3 area 0
+ network 200.0.5.0 0.0.0.3 area 0
+ network 200.0.6.0 0.0.0.3 area 0
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! R4-ISP
+! Conexiones: Se0/1/0 -> R3-ISP, Se0/1/1 -> R5-ISP, Se0/2/0 -> R7-ISP
+!===============================================================================
+enable
+config terminal
+hostname R4-ISP
+banner motd # ACCESO RESTRINGIDO. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+interface Serial0/1/0
+ description Enlace a R3-ISP (Se0/2/0)
+ ip address 200.0.6.2 255.255.255.252
+ no shutdown
+
+interface Serial0/1/1
+ description Enlace a R5-ISP (Se0/1/1)
+ ip address 200.0.7.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/2/0
+ description Enlace a R7-ISP (Se0/1/1)
+ ip address 200.0.11.2 255.255.255.252
+ no shutdown
+
+router ospf 1
+ router-id 4.4.4.4
+ network 200.0.6.0 0.0.0.3 area 0
+ network 200.0.7.0 0.0.0.3 area 0
+ network 200.0.11.0 0.0.0.3 area 0
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! R5-ISP
+! Conexiones: Se0/1/0 -> R1-CUE, Se0/1/1 -> R4-ISP, Se0/2/0 -> R6-ISP
+!===============================================================================
+enable
+config terminal
+hostname R5-ISP
+banner motd # ACCESO RESTRINGIDO. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+interface Serial0/1/0
+ description WAN a R1-CUE (200.0.3.1)
+ ip address 200.0.3.2 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/1/1
+ description Enlace a R4-ISP (Se0/1/1)
+ ip address 200.0.7.2 255.255.255.252
+ no shutdown
+
+interface Serial0/2/0
+ description Enlace a R6-ISP (Se0/1/1)
+ ip address 200.0.8.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+router ospf 1
+ router-id 5.5.5.5
+ network 200.0.3.0 0.0.0.3 area 0
+ network 200.0.7.0 0.0.0.3 area 0
+ network 200.0.8.0 0.0.0.3 area 0
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! R6-ISP
+! Conexiones: Se0/1/0 -> R1-ISP, Se0/1/1 -> R5-ISP, Se0/2/0 -> R7-ISP
+!===============================================================================
+enable
+config terminal
+hostname R6-ISP
+banner motd # ACCESO RESTRINGIDO. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+interface Serial0/1/0
+ description Enlace a R1-ISP (Se0/1/1)
+ ip address 200.0.9.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/1/1
+ description Enlace a R5-ISP (Se0/2/0)
+ ip address 200.0.8.2 255.255.255.252
+ no shutdown
+
+interface Serial0/2/0
+ description Enlace a R7-ISP (Se0/2/0)
+ ip address 200.0.12.2 255.255.255.252
+ no shutdown
+
+router ospf 1
+ router-id 6.6.6.6
+ network 200.0.8.0 0.0.0.3 area 0
+ network 200.0.9.0 0.0.0.3 area 0
+ network 200.0.12.0 0.0.0.3 area 0
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
+
+
+
+!===============================================================================
+! R7-ISP (Router Central - Malla)
+! Conexiones: Se0/1/0 -> R2-ISP, Se0/1/1 -> R4-ISP, Se0/2/0 -> R6-ISP
+!===============================================================================
+enable
+config terminal
+hostname R7-ISP
+banner motd # ACCESO RESTRINGIDO. #
+service password-encryption
+enable secret RUGIEDadmin2024
+
+interface Serial0/1/0
+ description Enlace a R2-ISP (Se0/2/0)
+ ip address 200.0.10.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/1/1
+ description Enlace a R4-ISP (Se0/2/0)
+ ip address 200.0.11.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+interface Serial0/2/0
+ description Enlace a R6-ISP (Se0/2/0)
+ ip address 200.0.12.1 255.255.255.252
+ clock rate 128000
+ no shutdown
+
+router ospf 1
+ router-id 7.7.7.7
+ network 200.0.10.0 0.0.0.3 area 0
+ network 200.0.11.0 0.0.0.3 area 0
+ network 200.0.12.0 0.0.0.3 area 0
+
+line vty 0 15
+ password RUGIEDaccess
+ login
+ exec-timeout 10 0
+
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+
+end
+write memory
