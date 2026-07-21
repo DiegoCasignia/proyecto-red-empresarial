@@ -140,7 +140,6 @@ Todo el direccionamiento privado se ajusta al estándar **RFC 1918**, mientras q
 | R1-GYE | Se0/1/0 | 200.0.2.1/30 | R1-ISP (Se0/1/0: 200.0.2.2) |
 | R1-CUE | Se0/1/0 | 200.0.3.1/30 | R5-ISP (Se0/1/0: 200.0.3.2) |
 | Routers ISP | Enlaces seriales | 200.0.4.0/30 – 200.0.12.0/30 | Asignación secuencial según topología. |
-| Loopbacks (Sede) | Loopback0 | 10.255.255.1/32 (UIO), .2 (GYE), .3 (CUE) | Identificación OSPF / EIGRP. |
 
 ---
 

@@ -2,13 +2,13 @@
 !                                                                              !
 !   PROYECTO REDES DE COMUNICACIONES                                           !
 !   CONFIGURACION COMPLETA - IOS CISCO                                         !
-!   Topologia: Matriz (UIO) + Sucursales (GYE, CUE) + ISP Cloud               !
+!   Topologia: Matriz (UIO) + Sucursales (GYE, CUE) + ISP Cloud                !
 !                                                                              !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! 1. MATRIZ - QUITO (UIO)                                                     !
+! 1. MATRIZ - QUITO (UIO)                                                      !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
@@ -39,11 +39,6 @@ interface Serial0/1/0
  description WAN a R3-ISP (200.0.1.2)
  ip address 200.0.1.1 255.255.255.252
  ip nat outside
- no shutdown
-
-! Loopback para identificacion OSPF/EIGRP
-interface Loopback0
- ip address 10.255.255.1 255.255.255.255
  no shutdown
 
 ! TUNEL GRE hacia R1-GYE (192.168.200.0/30)
@@ -107,6 +102,7 @@ interface GigabitEthernet0/0/1
 
 ip nat inside source list ACL-NAT interface Serial0/1/0 overload
 
+! primero configurar underlay, cuando todos los routers de la WAN hagan ping se configura el Overlay
 ! OSPF (Underlay - Red Publica ISP)
 router ospf 1
  router-id 10.255.255.1
@@ -119,7 +115,6 @@ router eigrp 100
  network 192.168.0.0 0.0.0.3
  network 192.168.200.0 0.0.0.3
  network 192.168.200.4 0.0.0.3
- network 10.255.255.1 0.0.0.0
  passive-interface default
  no passive-interface GigabitEthernet0/0/1
  no passive-interface Tunnel0
@@ -134,14 +129,8 @@ line vty 0 15
  login local
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
-
-
+do wr
 
 !===============================================================================
 ! MLS-UIO (Multilayer Switch - Nucleo Colapsado - Quito)
@@ -286,7 +275,7 @@ ip dhcp pool VLAN80-MARKETING
  dns-server 192.168.90.10
  domain-name rugied.local
 
-! EIGRP (Overlay)
+! EIGRP Overlay
 router eigrp 100
  network 192.168.0.0 0.0.0.3
  network 192.168.20.0 0.0.0.63
@@ -305,12 +294,8 @@ line vty 0 15
  login local
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -358,12 +343,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -406,12 +387,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -454,12 +431,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -513,13 +486,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
-
+do wr
 
 
 
@@ -555,11 +523,6 @@ interface Serial0/1/0
  description WAN a R1-ISP (200.0.2.2)
  ip address 200.0.2.1 255.255.255.252
  ip nat outside
- no shutdown
-
-! Loopback
-interface Loopback0
- ip address 10.255.255.2 255.255.255.255
  no shutdown
 
 ! Tunel GRE hacia R1-UIO (192.168.200.0/30)
@@ -630,7 +593,6 @@ router eigrp 100
  network 172.168.0.0 0.0.0.3
  network 192.168.200.0 0.0.0.3
  network 192.168.200.8 0.0.0.3
- network 10.255.255.2 0.0.0.0
  passive-interface default
  no passive-interface GigabitEthernet0/0/1
  no passive-interface Tunnel0
@@ -643,12 +605,8 @@ line vty 0 15
  login local
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -764,13 +722,8 @@ line vty 0 15
  login local
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
-
+do wr
 
 
 !===============================================================================
@@ -812,12 +765,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -860,12 +809,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -902,11 +847,6 @@ interface Serial0/1/0
  description WAN a R5-ISP (200.0.3.2)
  ip address 200.0.3.1 255.255.255.252
  ip nat outside
- no shutdown
-
-! Loopback
-interface Loopback0
- ip address 10.255.255.3 255.255.255.255
  no shutdown
 
 ! Tunel GRE hacia R1-UIO (192.168.200.4/30)
@@ -977,7 +917,6 @@ router eigrp 100
  network 10.0.0.0 0.0.0.3
  network 192.168.200.4 0.0.0.3
  network 192.168.200.8 0.0.0.3
- network 10.255.255.3 0.0.0.0
  passive-interface default
  no passive-interface GigabitEthernet0/0/1
  no passive-interface Tunnel0
@@ -990,12 +929,8 @@ line vty 0 15
  login local
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1116,12 +1051,8 @@ line vty 0 15
  login local
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1164,12 +1095,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1218,12 +1145,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1259,12 +1182,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1315,12 +1234,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1362,12 +1277,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1410,12 +1321,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1457,12 +1364,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1505,12 +1408,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1552,12 +1451,8 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
 
 
 
@@ -1601,9 +1496,5 @@ line vty 0 15
  login
  exec-timeout 10 0
 
-line console 0
- logging synchronous
- exec-timeout 10 0
-
 end
-write memory
+do wr
