@@ -99,7 +99,6 @@ crypto isakmp key RUGIED-VPN address 200.0.3.1
 
 ! IPsec: Transform-set
 crypto ipsec transform-set RUGIED-TS esp-aes 256 esp-sha-hmac
- mode tunnel
 
 ! ACLs para trafico GRE a proteger
 ip access-list extended ACL-GRE-GYE
@@ -531,7 +530,6 @@ crypto isakmp key RUGIED-VPN address 200.0.1.1
 crypto isakmp key RUGIED-VPN address 200.0.3.1
 
 crypto ipsec transform-set RUGIED-TS esp-aes 256 esp-sha-hmac
- mode tunnel
 
 ip access-list extended ACL-GRE-UIO
  permit gre host 200.0.2.1 host 200.0.1.1
@@ -818,7 +816,6 @@ crypto isakmp key RUGIED-VPN address 200.0.1.1
 crypto isakmp key RUGIED-VPN address 200.0.2.1
 
 crypto ipsec transform-set RUGIED-TS esp-aes 256 esp-sha-hmac
- mode tunnel
 
 ip access-list extended ACL-GRE-UIO
  permit gre host 200.0.3.1 host 200.0.1.1
